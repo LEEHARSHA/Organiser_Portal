@@ -1,3 +1,4 @@
+
 "use client";
 
 import {
@@ -5,6 +6,8 @@ import {
   createUserWithEmailAndPassword,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
+  GoogleAuthProvider,
+  signInWithPopup,
   signOut as firebaseSignOut,
   type User,
 } from "@firebase/auth";
@@ -24,6 +27,7 @@ type AuthContextValue = {
   loading: boolean;
   configError: string | null;
   signIn: (email: string, password: string) => Promise<void>;
+  signInWithGoogle: () => Promise<void>;
   signUp: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
@@ -35,6 +39,7 @@ function authMessage(error: unknown) {
   const code = typeof error === "object" && error !== null && "code" in error
     ? String(error.code)
     : "";
+
   switch (code) {
     case "auth/invalid-credential":
     case "auth/wrong-password":
@@ -51,9 +56,15 @@ function authMessage(error: unknown) {
     case "auth/weak-password":
       return "Choose a stronger password with at least 6 characters.";
     case "auth/operation-not-allowed":
-      return "Email and password sign-in is not enabled for this Firebase project.";
+      return "This sign-in method is not enabled in Firebase.";
     case "auth/network-request-failed":
       return "Firebase could not be reached. Check your connection and retry.";
+    case "auth/popup-closed-by-user":
+      return "Google sign-in was cancelled.";
+    case "auth/popup-blocked":
+      return "Your browser blocked the Google sign-in popup. Allow popups and try again.";
+    case "auth/account-exists-with-different-credential":
+      return "An account already exists with this email. Sign in using your original method.";
     default:
       return error instanceof Error ? error.message : "Firebase Authentication failed.";
   }
@@ -72,12 +83,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (configError) return;
+
     let active = true;
     let unsubscribe: (() => void) | undefined;
+
     void Promise.resolve()
       .then(() => getCommunityAuth())
       .then((auth) => {
         if (!active) return;
+
         unsubscribe = onAuthStateChanged(auth, (currentUser) => {
           if (!active) return;
           setUser(currentUser);
@@ -91,6 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .catch(() => {
         if (active) setLoading(false);
       });
+
     return () => {
       active = false;
       unsubscribe?.();
@@ -100,6 +115,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signIn = useCallback(async (email: string, password: string) => {
     try {
       await signInWithEmailAndPassword(getCommunityAuth(), email.trim(), password);
+    } catch (error) {
+      throw new Error(authMessage(error));
+    }
+  }, []);
+
+  const signInWithGoogle = useCallback(async () => {
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: "select_account" });
+      await signInWithPopup(getCommunityAuth(), provider);
     } catch (error) {
       throw new Error(authMessage(error));
     }
@@ -134,8 +159,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ user, loading, configError, signIn, signUp, signOut, resetPassword }),
-    [user, loading, configError, signIn, signUp, signOut, resetPassword],
+    () => ({
+      user,
+      loading,
+      configError,
+      signIn,
+      signInWithGoogle,
+      signUp,
+      signOut,
+      resetPassword,
+    }),
+    [user, loading, configError, signIn, signInWithGoogle, signUp, signOut, resetPassword],
   );
+
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
